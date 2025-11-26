@@ -45,7 +45,7 @@ def get_key_financial_metrics(cik: str) -> dict:
                     if "form" in df.columns:
                         df = df[df["form"] == "10-K"]
                         
-                    df = df.sort_values("end", ascending=False).head(3)
+                    df = df.sort_values("end", ascending=False).drop_duplicates(subset=['fy']).head(3)
                     
                     # Store as list of dicts
                     output["data"][label] = df[["end", "val", "fy", "form"]].to_dict(orient="records")
