@@ -1,4 +1,3 @@
-# helper_lib/edgar_parser.py
 from pathlib import Path
 import requests
 import pandas as pd
@@ -43,6 +42,7 @@ def build_chunks_for_filings(cik: str, form_types=("10-K",), limit_per_form=3) -
                 "cik": cik,
                 "accession": row["accessionNumber"],
                 "filing_date": row["filingDate"],
+                "primary_doc": row["primaryDocument"], # <--- Ensures filenames are saved for links
                 "text": txt
             })
             
