@@ -1,6 +1,0 @@
-pyproject.toml
-edgar_analyst_copilot.egg-info/PKG-INFO
-edgar_analyst_copilot.egg-info/SOURCES.txt
-edgar_analyst_copilot.egg-info/dependency_links.txt
-edgar_analyst_copilot.egg-info/requires.txt
-edgar_analyst_copilot.egg-info/top_level.txt
