@@ -1,7 +1,7 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
+*.class
 *.so
 .Python
 build/
@@ -38,6 +38,7 @@ checkpoints/
 .DS_Store
 .vscode/
 .idea/
+*.log
 
 # Streamlit
 .streamlit/secrets.toml
