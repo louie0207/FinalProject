@@ -7,9 +7,6 @@ name = "edgar-analyst-copilot"
 version = "0.2.0"
 description = "Financial RAG pipeline with XBRL grounding and streaming chat"
 requires-python = ">=3.10"
-authors = [
-  {name = "Your Name", email = "your.email@example.com"}
-]
 dependencies = [
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
