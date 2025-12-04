@@ -1,187 +1,338 @@
+# ========================================================================
+# frontend.py — Clean Working Version (Streaming-Safe + 3 Questions Per Mode)
+# ========================================================================
 import streamlit as st
 import requests
-import json
 import pandas as pd
+import re
 
-# API Configuration
 API_BASE = "http://localhost:8000"
 
+def render_math(msg: str):
+    # pattern for math sequences wrapped in \( ... \)
+    pattern = r"\\\((.*?)\\\)"
+
+    def repl(match):
+        expr = match.group(1)
+        return f"$$ {expr} $$"
+
+    return re.sub(pattern, repl, msg)
+
+# ========================================================================
+# PAGE CONFIG
+# ========================================================================
 st.set_page_config(page_title="EDGAR Analyst Copilot", layout="wide")
 
 st.title("🤖 EDGAR Analyst Copilot")
 st.markdown("Financial Analysis grounded in **XBRL Data** and **SEC Filings**.")
 
-# Sidebar for Setup
+# ========================================================================
+# SIDEBAR
+# ========================================================================
 with st.sidebar:
     st.header("Configuration")
-    cik_input = st.text_input("Enter Company CIK or Ticker", value="AAPL")
-    
-    if st.button("Ingest/Refresh Data"):
-        with st.spinner(f"Ingesting data for {cik_input}..."):
-            try:
-                # 1. Ingest Documents (RAG)
-                r = requests.post(f"{API_BASE}/ingest", json={
-                    "cik": cik_input,
-                    "form": "10-K",
-                    "limit_per_form": 1
-                })
-                if r.status_code == 200:
-                    st.success("Ingestion Complete! Please wait a moment before chatting.")
-                else:
-                    st.error(f"Error: {r.text}")
-            except Exception as e:
-                st.error(f"Connection Failed: {e}")
 
-# Main Layout: Tabs for Chat and Data
-tab1, tab2 = st.tabs(["💬 Financial Chat", "📊 KPI Dashboard"])
+    mode = st.radio("Select Mode:", ["Single Company View", "Multi-Company Comparison"])
+    st.divider()
 
-# --- TAB 1: CHAT INTERFACE ---
-with tab1:
-    # Initialize chat history
+    # ---------------- SINGLE COMPANY MODE ----------------
+    if mode == "Single Company View":
+        cik_input = st.text_input("Enter Company CIK or Ticker", value="COST")
+
+        if st.button("Ingest / Refresh Data"):
+            with st.spinner("Ingesting..."):
+                try:
+                    r = requests.post(
+                        f"{API_BASE}/ingest",
+                        json={"cik": cik_input, "form": "10-K", "limit_per_form": 1},
+                        timeout=60
+                    )
+                    if r.status_code == 200:
+                        st.success("Ingestion Complete!")
+                    else:
+                        st.error(r.text)
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # ---------------- MULTI COMPANY MODE ----------------
+    else:
+        st.subheader("Companies to Compare")
+
+        if "tickers" not in st.session_state:
+            st.session_state.tickers = ["COST", "AMZN"]
+
+        # Add company
+        if st.button("➕ Add Company"):
+            st.session_state.tickers.append("")
+
+        # --- Render input fields WITHOUT removing blanks ---
+        for i in range(len(st.session_state.tickers)):
+            st.session_state.tickers[i] = st.text_input(
+                f"Company {i+1}",
+                value=st.session_state.tickers[i],
+                key=f"t_{i}"
+            )
+
+        # --- NEW BUTTON: Remove Blank Lines ---
+        if st.button("🧹 Remove Empty Rows"):
+            st.session_state.tickers = [t for t in st.session_state.tickers if t.strip()]
+            st.rerun()
+
+        # --- Only ingest CLEAN tickers, do not overwrite session list ---
+        clean_list = [t for t in st.session_state.tickers if t.strip()]
+
+        if st.button("🚀 Ingest All Companies"):
+            if not clean_list:
+                st.error("No valid companies entered.")
+            else:
+                with st.spinner("Ingesting all companies..."):
+                    try:
+                        requests.post(
+                            f"{API_BASE}/ingest_all",
+                            json={"ciks": clean_list, "form": "10-K", "limit_per_form": 1},
+                            timeout=120
+                        )
+                        st.success("All companies ingested!")
+                        st.session_state.all_ingested = True
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+
+# ========================================================================
+# MAIN TABS
+# ========================================================================
+if mode == "Single Company View":
+    tab_chat, tab_kpi = st.tabs(["💬 Financial Chat", "📊 KPI Dashboard"])
+else:
+    tab_chat, tab_compare = st.tabs(["💬 Financial Chat", "📈 Comparison Dashboard"])
+
+
+# ========================================================================
+# =====================  CHAT TAB  ======================
+# ========================================================================
+with tab_chat:
+
+    # chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # [FEATURE 1] Suggested Questions
+    # ====================================================================
+    # SUGGESTED QUESTIONS (correctly placed outside ask())
+    # ====================================================================
     st.write("### Suggested Questions")
-    col1, col2, col3 = st.columns(3)
-    
-    # Button Logic: Just append the message. The auto-trigger below will handle the API call.
-    if col1.button("Risk Summary"):
-        st.session_state.messages.append({"role": "user", "content": "Summarize the primary Risk Factors."})
-    
-    if col2.button("Revenue Growth"):
-        st.session_state.messages.append({"role": "user", "content": "How has revenue changed over the last 3 years?"})
 
-    if col3.button("Supply Chain"):
-        st.session_state.messages.append({"role": "user", "content": "What are the supply chain risks?"})
+    def ask(q):
+        st.session_state.messages.append({"role": "user", "content": q})
+        st.rerun()
+
+    # --------------------- SINGLE COMPANY ---------------------
+    if mode == "Single Company View":
+        T = cik_input.upper()
+
+        col1, col2, col3 = st.columns(3)
+
+        if col1.button("📉 Risk Summary"):
+            ask(f"Summarize the main risk factors for {T}.")
+
+        if col2.button("📈 Revenue Trend"):
+            ask(f"How has {T}'s revenue changed over the last 3 years?")
+
+        if col3.button("💰 Profitability"):
+            ask(f"Explain {T}'s profitability and key financial drivers.")
+
+    # --------------------- MULTI COMPANY ----------------------
+    else:
+        tickers = [t.upper() for t in st.session_state.tickers]
+        pretty = ", ".join(tickers)
+
+        col1, col2, col3 = st.columns(3)
+
+        if col1.button("📊 Revenue Comparison"):
+            ask(f"Compare the revenue growth of {pretty} over the last 3 years.")
+
+        if col2.button("💰 Profitability Ranking"):
+            ask(f"Which company among {pretty} is most profitable?")
+
+        if col3.button("⚠ Risk Comparison"):
+            ask(f"Compare the major risk factors across {pretty}.")
 
     st.divider()
 
-    # Display chat messages
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # Prevent chatting before ingesting data
+    if mode == "Multi-Company Comparison" and "all_ingested" not in st.session_state:
+        st.warning("⚠ Please ingest all companies first.")
+        st.stop()
 
-    # Chat Input (Manual Entry)
-    if prompt := st.chat_input("Ask about Revenue, Risks, or Net Income..."):
+    # --- Display chat messages ---
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]):
+            st.markdown(render_math(m["content"]))
+
+    # --- Chat input ---
+    if prompt := st.chat_input("Ask a question..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.rerun()
 
-    # Automatic Response Trigger (Handles both Buttons and Manual Input)
+    # ====================================================================
+    # AUTO TRIGGER ASSISTANT RESPONSE
+    # ====================================================================
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+
+        # Build payload
+        if mode == "Single Company View":
+            endpoint = "/chat"
+            payload = {
+                "cik": cik_input,
+                "messages": st.session_state.messages,
+                "form": "10-K"
+            }
+        else:
+            endpoint = "/chat_multi"
+            payload = {
+                "ciks": st.session_state.tickers,
+                "messages": st.session_state.messages,
+                "form": "10-K"
+            }
+
         with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            full_response = ""
-            
+            placeholder = st.empty()
+            full_reply = ""
+
             try:
-                # Prepare payload with history
-                payload = {
-                    "cik": cik_input,
-                    "messages": st.session_state.messages,
-                    "form": "10-K"
-                }
-                
-                # Request streaming response
-                with requests.post(f"{API_BASE}/chat", json=payload, stream=True) as response:
-                    if response.status_code == 200:
-                        for chunk in response.iter_content(chunk_size=None):
+                # --- STREAMING MODE ---
+                with requests.post(
+                    f"{API_BASE}{endpoint}",
+                    json=payload,
+                    stream=True,
+                    timeout=120
+                ) as r:
+                    try:
+                        for chunk in r.iter_content(chunk_size=1024):
                             if chunk:
-                                content = chunk.decode("utf-8")
-                                full_response += content
-                                message_placeholder.markdown(full_response + "▌")
-                        
-                        message_placeholder.markdown(full_response)
-                        # Save assistant message to history
-                        st.session_state.messages.append({"role": "assistant", "content": full_response})
-                    else:
-                        st.error(f"API Error: {response.status_code}")
-                        
-            except Exception as e:
-                st.error(f"Connection Error: {e}")
+                                text = chunk.decode("utf-8")
+                                full_reply += text
 
-# --- TAB 2: KPI DASHBOARD (XBRL) ---
-with tab2:
-    st.subheader(f"Financial KPIs for {cik_input}")
-    if st.button("Load Metrics"):
-        with st.spinner("Fetching XBRL Data..."):
-            try:
+                                # render math safely while streaming
+                                rendered = render_math(full_reply)
+                                placeholder.markdown(rendered + "▌", unsafe_allow_html=True)
+
+                        # final render when complete
+                        placeholder.markdown(render_math(full_reply), unsafe_allow_html=True)
+
+                    except requests.exceptions.ChunkedEncodingError:
+                        # fallback to full text if streaming breaks
+                        full_reply = r.text
+                        placeholder.markdown(render_math(full_reply), unsafe_allow_html=True)
+
+            except Exception:
+                # --- NON-STREAMING FINAL FALLBACK ---
+                r = requests.post(
+                    f"{API_BASE}{endpoint}",
+                    json=payload,
+                    timeout=120
+                )
+                full_reply = r.text
+                placeholder.markdown(render_math(full_reply), unsafe_allow_html=True)
+
+            # save final assistant message (raw, not rendered)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": full_reply
+            })
+
+            st.rerun()
+
+
+# ========================================================================
+# KPI TAB — SINGLE COMPANY ONLY
+# ========================================================================
+if mode == "Single Company View":
+    with tab_kpi:
+
+        st.subheader(f"📊 Financial KPIs — {cik_input}")
+
+        if st.button("Load Metrics"):
+            with st.spinner("Loading XBRL metrics..."):
                 r = requests.get(f"{API_BASE}/kpi/{cik_input}")
-                if r.status_code == 200:
-                    data = r.json().get("kpis", {}).get("data", {})
-                    
-                    if not data:
-                        st.warning("No XBRL data found.")
-                    else:
-                        # 1. Metric Cards
-                        col1, col2, col3 = st.columns(3)
-                        
-                        def show_metric(col, label, key):
-                            items = data.get(key, [])
-                            if items:
-                                latest = items[0]
-                                val = latest['val']
-                                # Format large numbers
-                                if val > 1_000_000_000:
-                                    val_str = f"${val/1_000_000_000:.2f} B"
-                                elif val > 1_000_000:
-                                    val_str = f"${val/1_000_000:.2f} M"
-                                else:
-                                    val_str = f"${val:,.0f}"
-                                col.metric(label, val_str, f"FY {latest['fy']}")
-                            else:
-                                col.metric(label, "N/A")
 
-                        show_metric(col1, "Revenue", "Revenues")
-                        show_metric(col2, "Net Income", "NetIncome")
-                        show_metric(col3, "Total Assets", "Assets")
-                        
-                        st.divider()
-                        
-                        # [FEATURE 2] Visualizations (Line Charts)
-                        st.subheader("📈 Financial Trends (3-Year View)")
-                        chart_col1, chart_col2 = st.columns(2)
-                        
-                        # Container to hold data for CSV export
-                        all_dfs = []
+            if r.status_code != 200:
+                st.error("Failed to fetch KPIs")
+                st.stop()
 
-                        def plot_trend(column, data_key, title, color_hex):
-                            items = data.get(data_key, [])
-                            if items:
-                                df = pd.DataFrame(items)
-                                df["end"] = pd.to_datetime(df["end"])
-                                df = df.sort_values("end")
-                                
-                                # Add to export list
-                                df["Metric"] = title
-                                all_dfs.append(df)
-                                
-                                with column:
-                                    st.markdown(f"**{title}**")
-                                    st.line_chart(df, x="end", y="val", color=color_hex)
-                        
-                        plot_trend(chart_col1, "Revenues", "Revenue Growth", "#2E8B57")
-                        plot_trend(chart_col2, "NetIncome", "Net Income Growth", "#4682B4")
+            data = r.json().get("kpis", {}).get("data", {})
 
-                        st.divider()
-                        
-                        # [FEATURE 3] CSV Export
-                        if all_dfs:
-                            combined_df = pd.concat(all_dfs, ignore_index=True)
-                            # Select clean columns for the CSV
-                            export_df = combined_df[["end", "val", "fy", "form", "Metric"]].sort_values(["Metric", "end"])
-                            
-                            csv = export_df.to_csv(index=False).encode('utf-8')
-                            
-                            st.download_button(
-                                label="📥 Download Financial Data (CSV)",
-                                data=csv,
-                                file_name=f"{cik_input}_financial_summary.csv",
-                                mime="text/csv",
-                            )
-                        
-                        with st.expander("View Raw XBRL Data"):
-                            st.json(data)
+            col1, col2, col3 = st.columns(3)
+
+            def metric(col, label, key):
+                if not data.get(key):
+                    col.metric(label, "N/A")
                 else:
-                    st.error("Failed to fetch KPIs")
-            except Exception as e:
-                st.error(f"Error: {e}")
+                    val = data[key][0]["val"]
+                    fy = data[key][0]["fy"]
+                    col.metric(label, f"${val:,.0f}", f"FY {fy}")
+
+            metric(col1, "Revenue", "Revenues")
+            metric(col2, "Net Income", "NetIncome")
+            metric(col3, "Assets", "Assets")
+
+            st.divider()
+
+            # Trends
+            chart1, chart2 = st.columns(2)
+
+            def trend(col, key, title):
+                df = pd.DataFrame(data.get(key, []))
+                if df.empty: return
+                df["end"] = pd.to_datetime(df["end"])
+                df = df.sort_values("end")
+                with col:
+                    st.markdown(f"**{title}**")
+                    st.line_chart(df, x="end", y="val")
+
+            trend(chart1, "Revenues", "Revenue Trend")
+            trend(chart2, "NetIncome", "Net Income Trend")
+
+
+# ========================================================================
+# COMPARISON TAB — MULTI COMPANY
+# ========================================================================
+else:
+    with tab_compare:
+
+        tickers = st.session_state.tickers
+
+        if len(tickers) < 2:
+            st.warning("Add at least 2 companies.")
+            st.stop()
+
+        if st.button("Run Comparison"):
+            with st.spinner("Fetching comparison..."):
+
+                all_data = {}
+                all_years = set()
+
+                for t in tickers:
+                    r = requests.get(f"{API_BASE}/compare_kpis", params={"cik1": t, "cik2": t})
+                    comp = r.json()["company1"]
+                    all_data[t] = comp
+                    all_years |= set(comp["years"])
+
+                years = sorted(all_years)
+
+                def align(yrs, vals, master):
+                    m = dict(zip(yrs, vals))
+                    return [m.get(y, None) for y in master]
+
+                # Revenue
+                st.subheader("📊 Revenue Comparison")
+                df_rev = {"Year": years}
+                for t in tickers:
+                    df_rev[t.upper()] = align(all_data[t]["years"], all_data[t]["revenue"], years)
+                st.line_chart(pd.DataFrame(df_rev), x="Year")
+
+                # Net Income
+                st.subheader("📊 Net Income Comparison")
+                df_ni = {"Year": years}
+                for t in tickers:
+                    df_ni[t.upper()] = align(all_data[t]["years"], all_data[t]["net_income"], years)
+                st.line_chart(pd.DataFrame(df_ni), x="Year")

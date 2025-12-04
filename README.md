@@ -49,7 +49,7 @@ FinalProject/
 
 1. Clone the Repository
 
-git clone [https://github.com/louie0207/FinalProject.git](https://github.com/louie0207/FinalProject.git)
+git clone https://github.com/louie0207/FinalProject.git
 cd FinalProject
 
 
