@@ -12,6 +12,8 @@ Finance-Aware Retrieval: Intelligently chunks filings to prioritize "Risk Factor
 
 Table-Grounded Reasoning: Fetches exact numbers (Revenue, Net Income) directly from SEC XBRL APIs to prevent math hallucinations.
 
+Multi-Company Comparison: Compare financial metrics and risk factors across multiple companies simultaneously.
+
 Strict Citations: Every text-based answer includes a direct, clickable citation to the source filing on SEC.gov.
 
 Visual Financial Trends: Automatically generates line charts for key financial metrics (Revenue, Net Income) over a 3-year period.

@@ -292,6 +292,28 @@ if mode == "Single Company View":
             trend(chart1, "Revenues", "Revenue Trend")
             trend(chart2, "NetIncome", "Net Income Trend")
 
+            # --- CSV EXPORT (Single) ---
+            export_rows = []
+            for metric_name, values in data.items():
+                for v in values:
+                    export_rows.append({
+                        "Metric": metric_name,
+                        "Fiscal Year": v["fy"],
+                        "Value": v["val"],
+                        "Date": v["end"]
+                    })
+            
+            if export_rows:
+                df_export = pd.DataFrame(export_rows)
+                csv = df_export.to_csv(index=False).encode('utf-8')
+                
+                st.download_button(
+                    label="📥 Download Financial Data (CSV)",
+                    data=csv,
+                    file_name=f"{cik_input}_financials.csv",
+                    mime="text/csv",
+                )
+
 
 # ========================================================================
 # COMPARISON TAB — MULTI COMPANY
@@ -323,16 +345,55 @@ else:
                     m = dict(zip(yrs, vals))
                     return [m.get(y, None) for y in master]
 
-                # Revenue
+                # Revenue Chart
                 st.subheader("📊 Revenue Comparison")
                 df_rev = {"Year": years}
                 for t in tickers:
                     df_rev[t.upper()] = align(all_data[t]["years"], all_data[t]["revenue"], years)
                 st.line_chart(pd.DataFrame(df_rev), x="Year")
 
-                # Net Income
+                # Net Income Chart
                 st.subheader("📊 Net Income Comparison")
                 df_ni = {"Year": years}
                 for t in tickers:
                     df_ni[t.upper()] = align(all_data[t]["years"], all_data[t]["net_income"], years)
                 st.line_chart(pd.DataFrame(df_ni), x="Year")
+
+                # --- NEW: CSV EXPORT (Multi-Company) ---
+                st.divider()
+                st.write("### 📥 Export Data")
+                
+                export_rows = []
+                for t in tickers:
+                    t_key = t.upper()
+                    # Retrieve the aligned data lists we used for the charts
+                    # Note: keys in df_rev/df_ni match t.upper()
+                    rev_vals = df_rev.get(t_key, [])
+                    ni_vals = df_ni.get(t_key, [])
+                    
+                    for i, y in enumerate(years):
+                        # Safety check
+                        r_val = rev_vals[i] if i < len(rev_vals) else None
+                        n_val = ni_vals[i] if i < len(ni_vals) else None
+                        
+                        if r_val is not None or n_val is not None:
+                            export_rows.append({
+                                "Fiscal Year": y,
+                                "Company": t_key,
+                                "Revenue": r_val,
+                                "Net Income": n_val
+                            })
+                
+                if export_rows:
+                    df_export_multi = pd.DataFrame(export_rows)
+                    # Sort for cleaner reading (by Year desc, then Company)
+                    df_export_multi = df_export_multi.sort_values(["Fiscal Year", "Company"], ascending=[False, True])
+                    
+                    csv_multi = df_export_multi.to_csv(index=False).encode('utf-8')
+                    
+                    st.download_button(
+                        label="Download Comparison Data (CSV)",
+                        data=csv_multi,
+                        file_name="financial_comparison.csv",
+                        mime="text/csv"
+                    )
